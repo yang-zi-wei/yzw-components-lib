@@ -10,7 +10,7 @@ const router = createRouter({
     {
       path: '/quill-editor',
       name: 'quill-editor',
-      component: () => import('@/views/quill-editor.vue'),
+      component: () => import('@/views/quill-editor-play.vue'),
     },
   ],
 })
