@@ -43,8 +43,8 @@ onBeforeMount(() => {
     const editor = document.querySelector(`#${id}.ql-container`)
     // 挂载成功
     if (editor) {
-      initAt()
-      initEmoji()
+      initAtIcon()
+      initEmojiIcon()
     }
     observer.disconnect()
   })
@@ -116,79 +116,69 @@ const options = computed<QuillOptions>(() => {
           },
           /** 点击工具栏at事件 */
           at() {
-            const carePosition = getCarePosition()
-            if (!carePosition) return
-            const { caretX, caretY, selection } = carePosition
-            if (!caretX && !caretY) return
-            const div = document.createElement('div')
-            Object.assign(div.style, {
-              width: '100px',
-              position: 'absolute',
-              left: `${caretX}px`,
-              top: `${caretY + 20}px`,
-            })
-            document.body.appendChild(div)
-            const Contr = createApp(AtUsersSelect, {
-              handleClickOutside: () => {
-                Contr.unmount()
-              },
-              onSelect(user: { id: number; userName: string }) {
-                if (selection) quill.insertEmbed(selection.index, 'atUser', user)
-                Contr.unmount()
-                quill.setSelection(selection.index + 1)
-                quill.format('atUser', false)
-              },
-            })
-            Contr.use(vuetify)
-            Contr.mount(div)
+            handleAt()
           },
         },
-      },
+      }
     },
   }
 })
 const editorWrapperRef = ref<Element>()
 
+// 监听显示对比数据的变化，同步更新富文本内容渲染
 watch(
   [() => props.showDiff, () => props.diffDelta],
-  () => {
-    const { showDiff } = props
-    if (showDiff) {
-      const [oldDelta, newDelta] = props.diffDelta
-      const diffDelta = getDiffDelta(oldDelta, newDelta)
-      console.log(diffDelta, 'diffDelta');
-
-      quill.setContents(diffDelta)
-    } else {
-      // 初始化编辑器内容
-      quill.setContents(props.delta)
-    }
-  }
+  () => initQuillContent()
 )
 
 onMounted(() => {
-  const { delta, showDiff } = props
   quill = new Quill(`#${editorId.value}`, options.value)
-  // 显示对比内容
+  initQuillContent()
+  initQuillListener()
+  initQuillCustomModules()
+})
+
+/** 初始化编辑器内容 */
+const initQuillContent = () => {
+  const { showDiff } = props
+  // 显示新旧内容对比
   if (showDiff) {
     const [oldDelta, newDelta] = props.diffDelta
     const diffDelta = getDiffDelta(oldDelta, newDelta)
     quill.setContents(diffDelta)
   } else {
-    // 初始化编辑器内容
-    quill.setContents(delta)
+    // 常规内容
+    quill.setContents(props.delta)
   }
+}
+
+/** 初始化编辑器的监听器 */
+const initQuillListener = () => {
   quill.on('text-change', () => {
     emit('update:delta', quill.getContents())
   })
-})
+}
 
-const initAt = () => {
+/** 初始化编辑器定制化模块 */
+const initQuillCustomModules = () => {
+  const initAtUserModule = () => {
+    quill.keyboard.addBinding({
+      key: '@',
+      shiftKey: true,
+      handler () {
+        handleAt()
+      }
+    })
+  }
+  initAtUserModule()
+}
+
+const initAtIcon = () => {
   const atDom = editorWrapperRef.value?.querySelector('.ql-at')
   if (atDom) atDom.innerHTML = '@'
 
 }
-const initEmoji = () => {
+const initEmojiIcon = () => {
   const atDom = editorWrapperRef.value?.querySelector('.ql-emoji')
   if (atDom) atDom.className += ' mdi mdi-emoticon-happy-outline'
 }
@@ -203,6 +193,34 @@ const deltaToText = (delta: Delta) => {
     // html字符串
     html: quill.root.innerHTML
   }
+}
+
+const handleAt = () => {
+  const carePosition = getCarePosition()
+  if (!carePosition) return
+  const { caretX, caretY, selection } = carePosition
+  if (!caretX && !caretY) return
+  const div = document.createElement('div')
+  Object.assign(div.style, {
+    width: '100px',
+    position: 'absolute',
+    left: `${caretX}px`,
+    top: `${caretY + 20}px`,
+  })
+  document.body.appendChild(div)
+  const Contr = createApp(AtUsersSelect, {
+    handleClickOutside: () => {
+      Contr.unmount()
+    },
+    onSelect(user: { id: number; userName: string }) {
+      if (selection) quill.insertEmbed(selection.index, 'atUser', user)
+      Contr.unmount()
+      quill.setSelection(selection.index + 1)
+      quill.format('atUser', false)
+    },
+  })
+  Contr.use(vuetify)
+  Contr.mount(div)
 }
 
 const dmp = new DiffMatchPatch()
