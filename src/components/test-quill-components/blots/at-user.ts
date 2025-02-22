@@ -6,20 +6,20 @@ class AtUserBlot extends Parchment.EmbedBlot {
   static tagName = 'u'
   static className = 'at-user-text'
 
-  static create(userInfo: { id: number; userName: string }) {
-    const { id, userName } = userInfo
+  static create(userInfo: { userId: number; userName: string }) {
+    const { userId, userName } = userInfo
     const node = super.create() as HTMLElement
     node.innerText = `@${userName}`
     node.style.color = '#2196F3'
-    node.setAttribute('data-username', userName)
-    node.setAttribute('data-userid', id.toString())
+    node.setAttribute('data-user-name', userName)
+    node.setAttribute('data-user-id', userId.toString())
     return node
   }
 
   static value(node: HTMLElement) {
     return {
-      username: node.dataset.username,
-      userid: node.dataset.userid,
+      userName: node.dataset.userName,
+      userId: node.dataset.userId,
     }
   }
   static formats() {

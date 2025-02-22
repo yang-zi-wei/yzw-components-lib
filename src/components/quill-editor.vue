@@ -1,6 +1,6 @@
 <template>
   <div ref="editorWrapperRef">
-    <div :id="editorId" class="editor"></div>
+    <div :id="editorId" class="quill-editor"></div>
   </div>
 </template>
 
@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import Quill, { Delta, type QuillOptions } from 'quill'
 import 'quill/dist/quill.snow.css'
 import '@/components/test-quill-components/blots/at-user'
+import '@/components/test-quill-components/attributors/diff'
 
 import { computed, createApp, onBeforeMount, onMounted, ref, watch } from 'vue'
 import { vuetify } from '@/utils/gloabl-config'
@@ -17,7 +18,7 @@ import { vuetify } from '@/utils/gloabl-config'
 import AtUsersSelect from '@/components/test-quill-components/at-users-select.vue'
 import EmojiSelect from '@/components/test-quill-components/emoji-select.vue'
 
-import DiffMatchPatch from "diff-match-patch";
+import { getDocument, parseJson } from '@/utils';
 
 defineOptions({ name: 'QuillEditor' })
 
@@ -32,6 +33,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
+  change: [Delta]
   'update:delta': [Delta]
 }>()
 
@@ -48,28 +50,14 @@ onBeforeMount(() => {
     }
     observer.disconnect()
   })
-  observer.observe(document.body, {
+  observer.observe(getDocument().body, {
     attributes: true,
     subtree: true
   })
 })
 
 let quill: Quill
-/** 获取光标的位置 */
-const getCarePosition = () => {
-  const selection = quill?.getSelection()
-  if (!selection) return
-  const editorBounds = quill.container.getBoundingClientRect()
-  const caretBounds = quill.getBounds(selection.index)
 
-  const caretX = editorBounds.left + (caretBounds?.left || 0) // 计算 X 绝对坐标
-  const caretY = editorBounds.top + (caretBounds?.top || 0) // 计算 Y 绝对坐标
-  return {
-    caretX,
-    caretY,
-    selection,
-  }
-}
 const options = computed<QuillOptions>(() => {
   const { disabled } = props
   return {
@@ -144,7 +132,11 @@ const initQuillContent = () => {
   // 显示新旧内容对比
   if (showDiff) {
     const [oldDelta, newDelta] = props.diffDelta
-    const diffDelta = getDiffDelta(oldDelta, newDelta)
+    const diffDelta = getDiffDelta(
+      clearProxy(oldDelta),
+      clearProxy(newDelta)
+    )
+    console.log(diffDelta, 'diffDelta')
     quill.setContents(diffDelta)
   } else {
     // 常规内容
@@ -156,6 +148,7 @@ const initQuillContent = () => {
 const initQuillListener = () => {
   quill.on('text-change', () => {
     emit('update:delta', quill.getContents())
+    emit('change', quill.getContents())
   })
 }
 
@@ -183,18 +176,6 @@ const initEmojiIcon = () => {
   if (atDom) atDom.className += ' mdi mdi-emoticon-happy-outline'
 }
 
-const deltaToText = (delta: Delta) => {
-  const div = document.createElement('div')
-  const quill = new Quill(div, { theme: 'snow', readOnly: true })
-  quill.setContents(delta)
-  return {
-    // 纯文本
-    text: quill.getText(),
-    // html字符串
-    html: quill.root.innerHTML
-  }
-}
-
 const handleAt = () => {
   const carePosition = getCarePosition()
   if (!carePosition) return
@@ -212,7 +193,7 @@ const handleAt = () => {
     handleClickOutside: () => {
       Contr.unmount()
     },
-    onSelect(user: { id: number; userName: string }) {
+    onSelect(user: { userId: number; userName: string }) {
       if (selection) quill.insertEmbed(selection.index, 'atUser', user)
       Contr.unmount()
       quill.setSelection(selection.index + 1)
@@ -223,47 +204,141 @@ const handleAt = () => {
   Contr.mount(div)
 }
 
-const dmp = new DiffMatchPatch()
-/** 获取对比后的富文本内容 */
+const clearProxy = (delta: Delta) => new Delta(parseJson(JSON.stringify(delta)))
 const getDiffDelta = (oldDelta: Delta, newDelta: Delta) => {
-  const oldText = deltaToText(oldDelta).text
-  const newText = deltaToText(newDelta).text
-  const diffData = dmp.diff_main(oldText, newText)
-  let likeDelta = new Delta()
-  let beforeIndex = 0
-  let afterIndex = 0
-  for (const [flag, text] of diffData) {
+  const diffDelta = oldDelta.diff(newDelta)
+  let resultDelta = new Delta()
+  let oldDeltaIndex = 0
+  for (const op of diffDelta.ops) {
+    const {
+      retain,
+      insert = '',
+      delete: deleteLength = 0
+    } = op
+    let flag = 1
+    // 如果为图片
+    if (typeof insert !== 'string') {
+      resultDelta = resultDelta.concat(
+        new Delta({ops: [{ ...op, attributes: { 'diff-bg-image': 'add' } }]})
+      )
+      continue
+    }
+    if (retain && typeof retain !== 'number') {
+      const retainDelta = oldDelta.slice(oldDeltaIndex).compose(new Delta({ops: [{ retain }]}))
+      resultDelta = resultDelta.concat(retainDelta)
+      const retainLength = retainDelta.length()
+      oldDeltaIndex += retainLength
+      continue
+    }
+    if (deleteLength) flag = -1
+    if (retain) flag = 0
+    const insertLength = insert.length
     const handleMap: Record<number, () => void> = {
       [0]: () => {
-        const beforeSlice = oldDelta.slice(beforeIndex, beforeIndex + text.length)
-        likeDelta = likeDelta.concat(beforeSlice)
-        beforeIndex += text.length
-        afterIndex += text.length
+        const oldSlice = oldDelta.slice(oldDeltaIndex, oldDeltaIndex + (retain || 0))
+        resultDelta = resultDelta.concat(oldSlice)
+        oldDeltaIndex += (retain || 0)
       },
       [1]: () => {
-        likeDelta = likeDelta.concat(
-          newDelta.slice(afterIndex, afterIndex + text.length)
-            .compose(new Delta({ops: [{ retain: text.length, attributes: { background: '#4CAF50', color: '#fff' } }]}))
-        )
-        afterIndex += text.length
+        const formatDelta = new Delta([op])
+          .compose(new Delta({ops: [{ retain: insertLength }]}))
+        formatDelta.forEach(op => {
+          const { insert, attributes = {} } = op
+          if (typeof insert === 'string') {
+            op.attributes = {
+              ...attributes,
+              'diff-bg': 'add'
+            }
+          } else {
+            op.attributes = {
+              ...attributes,
+              'diff-bg-image': 'add'
+            }
+          }
+        })
+        resultDelta = resultDelta.concat(formatDelta)
       },
       [-1]: () => {
-        const beforeSlice = oldDelta.slice(beforeIndex, beforeIndex + text.length)
-        const beforeSliceFormat = beforeSlice.compose(new Delta({ops: [{ retain: text.length, attributes: { background: '#F44336', color: '#fff' } }]}))
-        likeDelta = likeDelta.concat(beforeSliceFormat)
-        beforeIndex += text.length
+        const oldSlice = oldDelta.slice(oldDeltaIndex, oldDeltaIndex + deleteLength)
+        const oldSliceFormat = oldSlice.compose(new Delta({ops: [{ retain: deleteLength }]}))
+        oldSliceFormat.forEach(op => {
+          const { insert, attributes = {} } = op
+          if (typeof insert === 'string') {
+            op.attributes = {
+              ...attributes,
+              'diff-bg': 'delete'
+            }
+          } else {
+            op.attributes = {
+              ...attributes,
+              'diff-bg-image': 'delete'
+            }
+          }
+        })
+        resultDelta = resultDelta.concat(oldSliceFormat)
+        oldDeltaIndex += deleteLength
       }
     }
     handleMap[flag]()
   }
-  return likeDelta
+  /**
+   * 如果oldDelta长度为10，只有最前面长度为5的delta发生了变化比如操作了删除
+   * 那么diffDelta为: {ops: [{ delete: 5 }]}
+   * 所以这里需要将剩余部分补充到resultDelta上去
+   */
+  if (oldDeltaIndex < oldDelta.length() - 1) {
+    resultDelta = resultDelta.concat(oldDelta.slice(oldDeltaIndex))
+  }
+  return resultDelta
+}
+
+/** 获取光标的位置 */
+const getCarePosition = () => {
+  const selection = quill?.getSelection()
+  if (!selection) return
+  const editorBounds = quill.container.getBoundingClientRect()
+  const caretBounds = quill.getBounds(selection.index)
+
+  const caretX = editorBounds.left + (caretBounds?.left || 0) // 计算 X 绝对坐标
+  const caretY = editorBounds.top + (caretBounds?.top || 0) // 计算 Y 绝对坐标
+  return {
+    caretX,
+    caretY,
+    selection,
+  }
 }
 </script>
 
 <style lang="scss">
-.editor {
+.quill-editor {
   width: 400px;
   height: 200px;
+  .diff-bg-image-add,
+  .diff-bg-image-delete {
+    position: relative;
+    display: inline-block;
+    &::after {
+      content: '';
+      opacity: .2;
+      position: absolute;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      right: 0;
+    }
+  }
+  .diff-bg-image-add::after {
+    background-color: #4CAF50;
+  }
+  .diff-bg-image-delete::after {
+    background-color: #F44336;
+  }
+  .diff-bg-add {
+    background-color: #4CAF50;
+  }
+  .diff-bg-delete {
+    background-color: #F44336;
+  }
 }
 .ql-snow.ql-toolbar button {
   &.ql-at,

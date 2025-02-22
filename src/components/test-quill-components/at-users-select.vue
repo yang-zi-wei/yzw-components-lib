@@ -1,7 +1,7 @@
 <template>
   <v-card v-click-outside="handleClickOutside">
     <v-list density="compact">
-      <v-list-item v-for="user in users" :key="user.id" :value="user" @click="onSelect(user)">{{
+      <v-list-item v-for="user in users" :key="user.userId" :value="user" @click="onSelect(user)">{{
         user.userName
       }}</v-list-item>
     </v-list>
@@ -10,7 +10,7 @@
 
 <script lang="ts" setup>
 interface User {
-  id: number
+  userId: number
   userName: string
 }
 
@@ -27,15 +27,15 @@ const emit = defineEmits(['select'])
 const users = [
   {
     userName: '成员A',
-    id: 1,
+    userId: 1,
   },
   {
     userName: '成员B',
-    id: 2,
+    userId: 2,
   },
   {
     userName: '成员C',
-    id: 3,
+    userId: 3,
   },
 ]
 
