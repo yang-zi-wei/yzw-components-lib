@@ -352,13 +352,4 @@ const getCarePosition = () => {
     top: 1px;
   }
 }
-#editor-diff {
-  width: 800px;
-  height: 200px;
-}
-#editor-before,
-#editor-after {
-  width: 500px;
-  height: 150px;
-}
 </style>
