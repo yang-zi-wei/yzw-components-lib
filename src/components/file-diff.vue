@@ -1,31 +1,13 @@
 <template>
+
   <div class="file-diff">
     <div class="file-header">{{ fileInfoDesc }}</div>
-    <div v-for="(area, areaIndex) in renderAreas" :key="area.fileInfo">
-      <div class="file-info">{{ area.fileInfo }}</div>
-      <div class="diff-body d-flex">
-        <div class="left-area">
-          <div class="area-wrapper">
-            <div class="file-row d-flex" :class="{ delete: left.delete, 'empty-row': !left.seq }" v-for="(left, rowIndex) in area.leftRows" :key="left.seq">
-              <div class="row-index d-inline-block flex-shrink-0">{{ left.seq || '' }}</div>
-              <div v-if="diffContents" class="row-content d-inline-flex flex-nowrap"
-                v-html="diffContents[areaIndex][rowIndex].oldContent">
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="right-area">
-          <div class="area-wrapper">
-            <div class="file-row d-flex" :class="{ add: right.add, 'empty-row': !right.seq }" v-for="(right, rowIndex) in area.rightRows" :key="right.seq">
-              <div class="row-index d-inline-block flex-shrink-0">{{ right.seq || '' }}</div>
-              <div v-if="diffContents" class="row-content d-inline-flex flex-nowrap"
-                v-html="diffContents[areaIndex][rowIndex].newContent"
-              ></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <side-by-side
+      v-if="renderType === RenderType.两栏"
+      :render-areas-by-sides="renderAreasBySides"
+      :diff-contents="diffContents"
+    />
+    <line-by-line v-else :render-areas-by-lines="renderAreasByLines"/>
   </div>
 </template>
 
@@ -36,24 +18,19 @@ import 'highlight.js/styles/github.css';
 import hljs from 'highlight.js/lib/core';
 import typescript from 'highlight.js/lib/languages/typescript';
 import * as Diff from 'diff'
+import { RenderType } from '@/enums/file-diff';
+import type { RenderUnit, RenderUnitByLines, RowUnit } from '@/types/file-diff';
+
+import lineByLine from './file-diff-components/line-by-line.vue';
+import sideBySide from './file-diff-components/side-by-side.vue';
 
 hljs.registerLanguage('typescript', typescript);
 
-window.Diff = Diff
-
-interface RowUnit {
-  seq: number;
-  content: string;
-  add?: boolean;
-  delete?: boolean;
-}
-interface RenderUnit {
-  fileInfo: string;
-  leftRows: RowUnit[];
-  rightRows: RowUnit[];
-}
-
 defineOptions({ name: 'FileDiff' })
+
+defineProps<{
+  renderType: RenderType;
+}>()
 
 const fileInfo = ref({
   oldFileName: '',
@@ -70,11 +47,144 @@ const fileInfoDesc = computed(() => {
   return `${oldFileName} -> ${newFileName}`
 })
 
-const renderAreas = ref<RenderUnit[]>([])
+const renderAreasBySides = ref<RenderUnit[]>([])
 const diffContents = ref<Array<Array<{ oldContent: string; newContent: string; }>>>()
 
+const renderAreasByLines = ref<RenderUnitByLines[]>([])
+
+onMounted(() => {
+  getDiff().then(diffStrArr => {
+    const {
+      areasBySides,
+      areasByLines,
+      fileInfo: theFileInfo
+    } = handleDiffStrArr(diffStrArr)
+    renderAreasByLines.value = areasByLines
+    console.log(areasByLines);
+
+    renderAreasBySides.value = areasBySides
+    fileInfo.value = theFileInfo
+    diffContents.value = getDiffContents()
+  })
+})
+
+let leftStart = 0
+let rightStart = 0
+
+let storeLeftRows: RowUnit[] = []
+let storeRightRows: RowUnit[] = []
+
+/**
+ * 处理得到渲染区域数组 renderArea
+ * @param diffStrArr 后端返回的diff字符串切割换行得到的数组
+ */
+const handleDiffStrArr = (diffStrArr: string[]) => {
+  let fileInfo = {
+    oldFileName: '',
+    newFileName: ''
+  }
+  const areasBySides: RenderUnit[] = []
+  const areasByLines: RenderUnitByLines[] = []
+  for (const row of diffStrArr) {
+      const lastAreaByLines = areasByLines[areasByLines.length - 1]
+      if (row.startsWith('===')) continue
+      if (row.startsWith('Index')) {
+        const fileName = row.split('Index:')[1].slice(1)
+        fileInfo = {
+          oldFileName: fileName,
+          newFileName: fileName
+        }
+        continue
+      }
+      if (row.startsWith('+++')) {
+        fileInfo.newFileName = row.slice(4)
+        continue
+      }
+      if (row.startsWith('---')) {
+        fileInfo.oldFileName = row.slice(4)
+        continue
+      }
+      if (row.startsWith('@@')) {
+        areasByLines.push({
+          fileInfo: row,
+          lines: []
+        })
+        // 暂存区不相等，则打上空行补丁
+        if (storeLeftRows.length !== storeRightRows.length) {
+          patchRenderUnit(areasBySides)
+        }
+        areasBySides.push({
+          ...getEmptyRenderUnit(),
+          fileInfo: row
+        })
+        const match = row.match(/\W+(\d+),\d+\W+(\d+)/)
+        leftStart = Number(match?.[1])
+        rightStart = Number(match?.[2])
+        continue
+      }
+      if (row.startsWith('-')) {
+        lastAreaByLines.lines.push({
+          oldSeq: leftStart,
+          content: row,
+          delete: true
+        })
+        storeLeftRows.push({
+          seq: leftStart,
+          content: row,
+          delete: true
+        })
+        leftStart++
+        continue
+      }
+      if (row.startsWith('+')) {
+        lastAreaByLines.lines.push({
+          newSeq: rightStart,
+          content: row,
+          add: true
+        })
+        storeRightRows.push({
+          seq: rightStart,
+          content: row,
+          add: true
+        })
+        rightStart++
+        continue
+      }
+      lastAreaByLines.lines.push({
+        oldSeq: leftStart,
+        newSeq: rightStart,
+        content: row,
+        normal: true
+      })
+      patchRenderUnit(areasBySides)
+      const lastRenderUnit = areasBySides[areasBySides.length - 1]
+      const {
+        leftRows,
+        rightRows
+      } = lastRenderUnit
+      const leftRowUnit = {
+        seq: leftStart,
+        content: row
+      }
+      const rightRowUnit = {
+        seq: rightStart,
+        content: row
+      }
+      leftStart++
+      rightStart++
+      leftRows.push(leftRowUnit)
+      rightRows.push(rightRowUnit)
+    }
+    patchRenderUnit(areasBySides)
+  return {
+    areasBySides,
+    fileInfo,
+    areasByLines
+  }
+}
+
 const getDiffContents = () => {
-  return renderAreas.value.reduce<Array<Array<{ newContent: string; oldContent: string;}>>>((result, areaItem, areaIndex) => {
+  return renderAreasBySides.value.reduce<Array<Array<{ newContent: string; oldContent: string;}>>>((result, areaItem, areaIndex) => {
     const { leftRows, rightRows} = areaItem
     leftRows.forEach((rowItem, rowIndex) => {
       if (!result[areaIndex]) result[areaIndex] = []
@@ -113,113 +223,12 @@ const getEmptyArea = () => ({
   content: ''
 })
 
-let leftStart = 0
-let rightStart = 0
-
-let storeLeftAreas: RowUnit[] = []
-let storeRightAreas: RowUnit[] = []
-onMounted(() => {
-  getDiff().then(diffStrArr => {
-    const {
-      areas,
-      fileInfo: theFileInfo
-    } = handleDiffStrArr(diffStrArr)
-    renderAreas.value = areas
-    fileInfo.value = theFileInfo
-    diffContents.value = getDiffContents()
-  })
-})
-
 const getDiff = () => {
   return axios.get<{ data: { diff: string } }>('/api/files-diff', {
     withCredentials: true,
   }).then(res => {
     return res.data.data.diff.split('\n')
   })
-}
-
-/**
- * 处理得到渲染区域数组 renderArea
- * @param diffStrArr 后端返回的diff字符串切割换行得到的数组
- */
-const handleDiffStrArr = (diffStrArr: string[]) => {
-  let fileInfo = {
-    oldFileName: '',
-    newFileName: ''
-  }
-  const areas: RenderUnit[] = []
-  for (const row of diffStrArr) {
-      if (row.startsWith('===')) continue
-      if (row.startsWith('Index')) {
-        const fileName = row.split('Index:')[1].slice(1)
-        fileInfo = {
-          oldFileName: fileName,
-          newFileName: fileName
-        }
-        continue
-      }
-      if (row.startsWith('+++')) {
-        fileInfo.newFileName = row.slice(4)
-        continue
-      }
-      if (row.startsWith('---')) {
-        fileInfo.oldFileName = row.slice(4)
-        continue
-      }
-      if (row.startsWith('@@')) {
-        // 暂存区不相等，则打上空行补丁
-        if (storeLeftAreas.length !== storeRightAreas.length) {
-          patchRenderUnit(areas)
-        }
-        areas.push({
-          ...getEmptyRenderUnit(),
-          fileInfo: row
-        })
-        const match = row.match(/\W+(\d+),\d+\W+(\d+)/)
-        leftStart = Number(match?.[1])
-        rightStart = Number(match?.[2])
-        continue
-      }
-      if (row.startsWith('-')) {
-        storeLeftAreas.push({
-          seq: leftStart++,
-          content: row,
-          delete: true
-        })
-        continue
-      }
-      if (row.startsWith('+')) {
-        storeRightAreas.push({
-          seq: rightStart++,
-          content: row,
-          add: true
-        })
-        continue
-      }
-      patchRenderUnit(areas)
-      const lastRenderUnit = areas[areas.length - 1]
-      const {
-        leftRows,
-        rightRows
-      } = lastRenderUnit
-      const leftRowUnit = {
-        seq: leftStart,
-        content: row
-      }
-      const rightRowUnit = {
-        seq: rightStart,
-        content: row
-      }
-      leftStart++
-      rightStart++
-      leftRows.push(leftRowUnit)
-      rightRows.push(rightRowUnit)
-    }
-    patchRenderUnit(areas)
-  return {
-    areas,
-    fileInfo
-  }
 }
 
 /** 将左右两边的空行补上 */
@@ -229,33 +238,33 @@ const patchRenderUnit = (area: RenderUnit[]) => {
     leftRows,
     rightRows
   } = lastRenderUnit
-  const areaDiffLength = storeLeftAreas.length - storeRightAreas.length
+  const areaDiffLength = storeLeftRows.length - storeRightRows.length
 
   if (areaDiffLength === 0) {
-    leftRows.push(...storeLeftAreas)
-    rightRows.push(...storeRightAreas)
-    storeLeftAreas = []
-    storeRightAreas = []
+    leftRows.push(...storeLeftRows)
+    rightRows.push(...storeRightRows)
+    storeLeftRows = []
+    storeRightRows = []
     return
   }
   if (areaDiffLength > 0) {
     rightRows.push(
       ...getEmptyAreas(areaDiffLength),
-      ...storeRightAreas
+      ...storeRightRows
     )
-    leftRows.push(...storeLeftAreas)
+    leftRows.push(...storeLeftRows)
   } else {
     const absDiffLength = Math.abs(areaDiffLength)
     leftRows.push(
       ...getEmptyAreas(absDiffLength),
-      ...storeLeftAreas
+      ...storeLeftRows
     )
-    rightRows.push(...storeRightAreas)
+    rightRows.push(...storeRightRows)
   }
   leftStart = (leftRows[leftRows.length - 1]?.seq || leftStart) + 1
   rightStart = (rightRows[rightRows.length - 1]?.seq || rightStart) + 1
-  storeLeftAreas = []
-  storeRightAreas = []
+  storeLeftRows = []
+  storeRightRows = []
 }
 
 const getEmptyAreas = (diffRowLength: number) => {
@@ -276,93 +285,18 @@ const handleDiffWords = (oldContent: string, newContent: string) => {
 <style lang="scss">
 .file-diff {
   font-size: 12px;
-  .file-header,
-  .diff-body,
-  .row-index,
-  .file-info {
-    border-color: #d8d8d8;
-    border-style: solid;
-    border-width: 0;
-    text-align: center;
-    padding: 2px 0;
-  }
-  .file-info {
-    border-bottom-width: 1px;
-    border-left-width: 1px;
-    border-right-width: 1px;
-  }
   .file-header {
     position: sticky;
     top: 0;
     z-index: 1;
-    padding: 8px;
+    padding: 6px;
     font-size: 16px;
     font-weight: 700;
-    border-width: 1px;
-    background-color: #f7f7f7;
+    border: 1px solid #d8d8d8;
+    background-color: rgba(229, 229, 229);
     border-top-left-radius: 4px;
     border-top-right-radius: 4px;
-  }
-  .diff-body {
-    border-width: 1px;
-    border-top: none;
-  }
-  .row-index {
-    position: sticky;
-    left: 0;
-    width: 52px;
     text-align: center;
-    background-color: #fff;
-  }
-  .row-index,
-  .file-row {
-    height: 20px;
-    line-height: 20px;
-  }
-  .row-content {
-    padding-left: 4px;
-    white-space: pre;
-  }
-  .left-area,
-  .right-area {
-    flex-basis: 50%;
-    flex-shrink: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-  .area-wrapper {
-    min-width: 100%;
-    width: fit-content;
-  }
-  .left-area {
-    .row-index {
-      border-right-width: 1px;
-    }
-  }
-  .right-area {
-    .row-index {
-      border-right-width: 1px;
-      border-left-width: 1px;
-    }
-  }
-  .file-row {
-    min-width: 100%;
-    width: fit-content;
-    &.delete {
-      background-color: #fee8e9;
-      .row-index {
-        background-color: #fee8e9;
-      }
-    }
-    &.add {
-      background-color: #dfd;
-      .row-index {
-        background-color: #dfd;
-      }
-    }
-    &.empty-row {
-      background-color: #f1f1f1;
-    }
   }
 }
 </style>
