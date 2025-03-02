@@ -50,7 +50,7 @@ onBeforeMount(() => {
     }
     observer.disconnect()
   })
-  observer.observe(getDocument().body, {
+  observer.observe(document.body, {
     attributes: true,
     subtree: true
   })
@@ -67,6 +67,7 @@ const options = computed<QuillOptions>(() => {
     modules: {
       toolbar: {
         container: [
+          { header: [1, 2, false] },
           'bold',
           'italic',
           'underline',
@@ -181,14 +182,14 @@ const handleAt = () => {
   if (!carePosition) return
   const { caretX, caretY, selection } = carePosition
   if (!caretX && !caretY) return
-  const div = document.createElement('div')
+  const div = getDocument().createElement('div')
   Object.assign(div.style, {
     width: '100px',
     position: 'absolute',
     left: `${caretX}px`,
     top: `${caretY + 20}px`,
   })
-  document.body.appendChild(div)
+  getDocument().body.appendChild(div)
   const Contr = createApp(AtUsersSelect, {
     handleClickOutside: () => {
       Contr.unmount()

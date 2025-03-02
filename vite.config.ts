@@ -17,7 +17,13 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     headers: {
-      'access-control-allow-origin': '*',
+      'access-control-allow-origin': '*'
     },
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:7001/',
+        changeOrigin: true
+      }
+    }
   },
 })
