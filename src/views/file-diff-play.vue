@@ -16,7 +16,7 @@
         variant="outlined"
       ></v-select>
     </div>
-    <div style="width: 95%; height: 95%; overflow: auto;">
+    <div style="width: 95%; height: 95%;">
       <file-diff :renderType="renderType"/>
     </div>
   </div>

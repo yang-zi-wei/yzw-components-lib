@@ -1,5 +1,4 @@
 <template>
-
   <div class="file-diff">
     <div class="file-header">{{ fileInfoDesc }}</div>
     <side-by-side
@@ -47,9 +46,11 @@ const fileInfoDesc = computed(() => {
   return `${oldFileName} -> ${newFileName}`
 })
 
+/** 双栏模式 */
 const renderAreasBySides = ref<RenderUnit[]>([])
 const diffContents = ref<Array<Array<{ oldContent: string; newContent: string; }>>>()
 
+/** 单栏模式 */
 const renderAreasByLines = ref<RenderUnitByLines[]>([])
 
 onMounted(() => {
@@ -60,7 +61,6 @@ onMounted(() => {
       fileInfo: theFileInfo
     } = handleDiffStrArr(diffStrArr)
     renderAreasByLines.value = areasByLines
-    console.log(areasByLines);
 
     renderAreasBySides.value = areasBySides
     fileInfo.value = theFileInfo

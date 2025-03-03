@@ -21,10 +21,31 @@ export default defineConfigWithVueTs(
 
   pluginVue.configs['flat/essential'],
   vueTsConfigs.recommended,
-  
+
   {
     ...pluginVitest.configs.recommended,
     files: ['src/**/__tests__/*'],
   },
   skipFormatting,
+  {
+    languageOptions: {
+      parserOptions: {
+        sourceType: 'module',
+        ecmaFeatures: {
+          jsx: true,
+        },
+      },
+    },
+  },
+  {
+    rules: {
+      'vue/block-lang': ['error',
+        {
+          script: {
+            lang: ['ts', 'tsx']
+          }
+        }
+      ]
+    }
+  }
 )
